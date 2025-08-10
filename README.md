@@ -40,6 +40,7 @@ It also includes a minimal admin page (`/admin.html`) that lets you toggle a use
   - Headers: `x-admin-secret: <ADMIN_SECRET>`, `Content-Type: application/json`
   - Body: `{"user_id":"<uuid>","active":false}`
 
+
 ---
 
 ## Notes
