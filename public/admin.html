@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>R.E.A.L. Warsaw — Admin</title>
+  <style>
+    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:20px;max-width:900px}
+    header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
+    h1{font-size:20px;margin:0}
+    input,button,select{padding:8px;border:1px solid #ccc;border-radius:8px}
+    table{width:100%;border-collapse:collapse;margin-top:16px}
+    th,td{border-bottom:1px solid #eee;padding:8px;text-align:left;font-size:14px}
+    tr:hover{background:#fafafa}
+    .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .badge{font-size:12px;padding:2px 8px;border-radius:999px;background:#eee}
+  </style>
+</head>
+<body>
+  <header>
+    <img src="/logo.png" alt="logo" width="32" height="32"/>
+    <h1>R.E.A.L. Warsaw — Admin</h1>
+  </header>
+
+  <div class="row">
+    <label>Admin Secret <input id="secret" type="password" placeholder="Enter ADMIN_SECRET"/></label>
+    <button id="load">Load students</button>
+  </div>
+
+  <table id="tbl">
+    <thead><tr><th>Email</th><th>Name</th><th>Active</th><th>Actions</th><th>Created</th><th>User ID</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const loadBtn = document.getElementById('load');
+    const secretEl = document.getElementById('secret');
+    const tbody = document.querySelector('#tbl tbody');
+
+    loadBtn.onclick = async () => {
+      tbody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
+      const resp = await fetch('/api/admin-list', { headers: {'x-admin-secret': secretEl.value || ''} });
+      if(!resp.ok){ tbody.innerHTML = '<tr><td colspan="6">Failed to load (check secret)</td></tr>'; return; }
+      const rows = await resp.json();
+      tbody.innerHTML = '';
+      for(const r of rows){
+        const tr = document.createElement('tr');
+        tr.innerHTML = \`
+          <td>\${r.email||''}</td>
+          <td>\${r.full_name||''}</td>
+          <td><span class="badge" style="background:\${r.active?'#e6ffed':'#ffe6e6'}">\${r.active?'Yes':'No'}</span></td>
+          <td><button class="toggle">\${r.active?'Revoke':'Activate'}</button></td>
+          <td>\${new Date(r.created_at).toLocaleString()}</td>
+          <td style="font-family:monospace">\${r.user_id}</td>
+        \`;
+        tr.querySelector('.toggle').onclick = async () => {
+          const want = !r.active;
+          const ok = confirm((want?'Activate ':'Revoke ') + (r.email||r.user_id) + '?');
+          if(!ok) return;
+          const resp2 = await fetch('/api/admin-toggle', {
+            method:'POST',
+            headers:{
+              'Content-Type': 'application/json',
+              'x-admin-secret': secretEl.value || ''
+            },
+            body: JSON.stringify({ user_id: r.user_id, active: want })
+          });
+          if(resp2.ok){ loadBtn.onclick(); } else { alert('Failed to toggle'); }
+        };
+        tbody.appendChild(tr);
+      }
+    };
+  </script>
+</body>
+</html>
