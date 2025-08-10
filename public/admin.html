@@ -5,27 +5,32 @@
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>R.E.A.L. Warsaw — Admin</title>
   <style>
-    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:20px;max-width:900px}
+    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif;margin:20px;max-width:960px}
     header{display:flex;align-items:center;gap:12px;margin-bottom:16px}
     h1{font-size:20px;margin:0}
-    input,button,select{padding:8px;border:1px solid #ccc;border-radius:8px}
+    input,button{padding:8px;border:1px solid #ccc;border-radius:8px}
     table{width:100%;border-collapse:collapse;margin-top:16px}
     th,td{border-bottom:1px solid #eee;padding:8px;text-align:left;font-size:14px}
     tr:hover{background:#fafafa}
     .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
     .badge{font-size:12px;padding:2px 8px;border-radius:999px;background:#eee}
+    #status{font-size:13px;margin-top:8px;color:#444}
+    #status.error{color:#b00020}
+    #status.ok{color:#0a7d00}
   </style>
 </head>
 <body>
   <header>
-    <img src="/logo.png" alt="logo" width="32" height="32"/>
     <h1>R.E.A.L. Warsaw — Admin</h1>
   </header>
 
   <div class="row">
-    <label>Admin Secret <input id="secret" type="password" placeholder="Enter ADMIN_SECRET"/></label>
+    <label>Admin Secret
+      <input id="secret" type="password" placeholder="Enter ADMIN_SECRET"/>
+    </label>
     <button id="load">Load students</button>
   </div>
+  <div id="status"></div>
 
   <table id="tbl">
     <thead><tr><th>Email</th><th>Name</th><th>Active</th><th>Actions</th><th>Created</th><th>User ID</th></tr></thead>
@@ -33,41 +38,77 @@
   </table>
 
   <script>
-    const loadBtn = document.getElementById('load');
-    const secretEl = document.getElementById('secret');
+    const statusEl = document.getElementById('status');
     const tbody = document.querySelector('#tbl tbody');
+    const secretEl = document.getElementById('secret');
+    const loadBtn = document.getElementById('load');
+
+    function setStatus(msg, ok=false){
+      statusEl.className = ok ? 'ok' : 'error';
+      statusEl.textContent = msg;
+    }
 
     loadBtn.onclick = async () => {
-      tbody.innerHTML = '<tr><td colspan="6">Loading...</td></tr>';
-      const resp = await fetch('/api/admin-list', { headers: {'x-admin-secret': secretEl.value || ''} });
-      if(!resp.ok){ tbody.innerHTML = '<tr><td colspan="6">Failed to load (check secret)</td></tr>'; return; }
-      const rows = await resp.json();
+      const secret = (secretEl.value || '').trim();
       tbody.innerHTML = '';
-      for(const r of rows){
-        const tr = document.createElement('tr');
-        tr.innerHTML = \`
-          <td>\${r.email||''}</td>
-          <td>\${r.full_name||''}</td>
-          <td><span class="badge" style="background:\${r.active?'#e6ffed':'#ffe6e6'}">\${r.active?'Yes':'No'}</span></td>
-          <td><button class="toggle">\${r.active?'Revoke':'Activate'}</button></td>
-          <td>\${new Date(r.created_at).toLocaleString()}</td>
-          <td style="font-family:monospace">\${r.user_id}</td>
-        \`;
-        tr.querySelector('.toggle').onclick = async () => {
-          const want = !r.active;
-          const ok = confirm((want?'Activate ':'Revoke ') + (r.email||r.user_id) + '?');
-          if(!ok) return;
-          const resp2 = await fetch('/api/admin-toggle', {
-            method:'POST',
-            headers:{
-              'Content-Type': 'application/json',
-              'x-admin-secret': secretEl.value || ''
-            },
-            body: JSON.stringify({ user_id: r.user_id, active: want })
-          });
-          if(resp2.ok){ loadBtn.onclick(); } else { alert('Failed to toggle'); }
-        };
-        tbody.appendChild(tr);
+      statusEl.className = ''; statusEl.textContent = 'Loading…';
+      try {
+        const resp = await fetch('/api/admin-list', { headers: {'x-admin-secret': secret }});
+        const text = await resp.text();
+        if(!resp.ok){
+          setStatus(`Error ${resp.status}: ${text}`);
+          return;
+        }
+        let rows = [];
+        try { rows = JSON.parse(text); }
+        catch(e){ setStatus('Bad JSON from server: ' + text.slice(0,120)); return; }
+
+        if(!Array.isArray(rows) || rows.length === 0){
+          tbody.innerHTML = '<tr><td colspan="6">No students found.</td></tr>';
+          setStatus('Loaded 0 students.', true);
+          return;
+        }
+
+        tbody.innerHTML = '';
+        for(const r of rows){
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${r.email||''}</td>
+            <td>${r.full_name||''}</td>
+            <td><span class="badge" style="background:${r.active?'#e6ffed':'#ffe6e6'}">${r.active?'Yes':'No'}</span></td>
+            <td><button class="toggle">${r.active?'Revoke':'Activate'}</button></td>
+            <td>${r.created_at ? new Date(r.created_at).toLocaleString() : ''}</td>
+            <td style="font-family:monospace">${r.user_id||''}</td>
+          `;
+          tr.querySelector('.toggle').onclick = async () => {
+            const want = !r.active;
+            const ok = confirm((want?'Activate ':'Revoke ') + (r.email||r.user_id) + '?');
+            if(!ok) return;
+            try {
+              const resp2 = await fetch('/api/admin-toggle', {
+                method:'POST',
+                headers:{
+                  'Content-Type':'application/json',
+                  'x-admin-secret': (secretEl.value||'').trim()
+                },
+                body: JSON.stringify({ user_id: r.user_id, active: want })
+              });
+              if(resp2.ok){
+                setStatus('Updated. Reloading…', true);
+                loadBtn.onclick();
+              } else {
+                const t = await resp2.text();
+                setStatus(`Toggle failed (${resp2.status}): ${t}`);
+              }
+            } catch(e) {
+              setStatus('Toggle error: ' + e.message);
+            }
+          };
+          tbody.appendChild(tr);
+        }
+        setStatus(`Loaded ${rows.length} students.`, true);
+      } catch(e){
+        setStatus('Network error: ' + e.message);
       }
     };
   </script>
